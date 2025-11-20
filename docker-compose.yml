@@ -1,0 +1,65 @@
+services:
+  # ---------------------------------------------------------
+  # 1. THE BROWSER (Isolated Environment)
+  # ---------------------------------------------------------
+  browser:
+    image: selenium/standalone-chrome:latest
+    container_name: sandbox-browser
+    shm_size: 2g
+    ports:
+      - "7900:7900"  # Web-based VNC access to the browser
+    environment:
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=1
+      - SE_VNC_NO_PASSWORD=1
+      # FORCE traffic through our spy proxy (mitmproxy)
+      - HTTP_PROXY=http://172.25.0.3:8080
+      - HTTPS_PROXY=http://172.25.0.3:8080
+      # Ignore proxy for internal selenium comms
+      - NO_PROXY=localhost,127.0.0.1
+    dns:
+      - 172.25.0.2   # Point to our custom DNS controller
+    networks:
+      sandbox_net:
+        ipv4_address: 172.25.0.4
+    depends_on:
+      - proxy
+      - dns
+
+  # ---------------------------------------------------------
+  # 2. THE NETWORK CONTROLLER (DNS & Spoofing)
+  # ---------------------------------------------------------
+  dns:
+    image: strm/dnsmasq
+    container_name: sandbox-dns
+    volumes:
+      # Mount the local config file into the container
+      - ./config/dnsmasq.conf:/etc/dnsmasq.conf
+    cap_add:
+      - NET_ADMIN
+    networks:
+      sandbox_net:
+        ipv4_address: 172.25.0.2
+
+  # ---------------------------------------------------------
+  # 3. THE TRAFFIC LOGGER (Man-In-The-Middle)
+  # ---------------------------------------------------------
+  proxy:
+    image: mitmproxy/mitmproxy
+    container_name: sandbox-proxy
+    # Run mitmweb to get the GUI interface
+    command: mitmweb --web-host 0.0.0.0 --listen-host 0.0.0.0 --set block_global=false
+    ports:
+      - "8081:8081" # The Traffic Inspector Web UI
+    networks:
+      sandbox_net:
+        ipv4_address: 172.25.0.3
+
+# ---------------------------------------------------------
+# 4. THE ISOLATED PRIVATE NETWORK
+# ---------------------------------------------------------
+networks:
+  sandbox_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24
